@@ -66,7 +66,7 @@ setting_offsetXMod = 0
 setting_offsetYMod = 0
 
 tick_time = 0
-cached_items = []
+cached_items = None
 scene_win_map = {}
 
 dimensions = {}
@@ -105,9 +105,9 @@ def script_properties():
 
 def script_defaults(settings):
     
-    obs.obs_data_set_default_int(settings, "offsetX", 0)
-    obs.obs_data_set_default_int(settings, "offsetY", 0)
-    obs.obs_data_set_default_int(settings, "offsetXMod", 0)
+    obs.obs_data_set_default_int(settings, "offsetX", 8)
+    obs.obs_data_set_default_int(settings, "offsetY", 50)
+    obs.obs_data_set_default_int(settings, "offsetXMod", 1920)
     obs.obs_data_set_default_int(settings, "offsetYMod", 0)
 
 
@@ -124,6 +124,23 @@ def script_update(settings):
     setting_offsetYMod = obs.obs_data_get_int(settings, "offsetYMod")
 
 
+def script_unload():
+
+    global cached_items
+    global dimensions
+
+    if cached_items is not None:
+
+        for key, item in cached_items.items():
+
+            #obs.obs_source_release(item["source"])
+            obs.obs_sceneitem_release(item["item"])
+
+    cached_items = {}
+
+    obs.obs_data_release(dimensions)
+
+
 def script_tick(tick):
 
     global tick_time
@@ -131,8 +148,9 @@ def script_tick(tick):
     tick_time += tick
 
     if (tick_time > 1):
-        cache_scenes()
         tick_time = 0
+
+        cache_scenes()
 
     process_items()
 
@@ -146,14 +164,28 @@ def button_test(props, prop):
 
     print(dimensions.base_width, dimensions.base_height)
 
+def clear_cache():
+
+    global cached_items
+
+    if cached_items is not None:
+
+        for key, item in cached_items.items():
+
+            #obs.obs_source_release(item["source"])
+            obs.obs_sceneitem_release(item["item"])
+
+    cached_items = {}
+
 
 def cache_scenes():
 
+    global scene_win_map
     global cached_items
     global tagRegex
     global dimensions
 
-    cached_items = []
+    clear_cache()
 
     cached_num = 0
 
@@ -177,13 +209,52 @@ def cache_scenes():
             
             if (re.match(tagRegex, source_name) and source_id == "window_capture"):
 
-                cached_items.append(item)
+                modifiers = {}
+
+                flagsSearch = re.findall(tagRegex, source_name)
+                flags = flagsSearch[0].split(",")
+
+                for flag in flags:
+                    modifiers[flag.lower()] = True
+
+                data = obs.obs_source_get_settings(source)
+
+                windowData = obs.obs_data_get_string(data, "window")
+                windowSplit = windowData.split(":")
+
+                windowTitle = windowSplit[0].replace("#3A", ":")
+                #print("Window Title: " + windowData[0])
+                #print("Window EXE: " + windowData[1])
+                
+                obs.obs_data_release(data)
+                
+                try:
+                    if (windowData in scene_win_map):
+                        myWin = scene_win_map[windowData]
+                    else:
+                        myWin = win.FindWindow(None, windowTitle)
+                        scene_win_map[windowData] = myWin
+                except:
+                    pass
+
+                cached_items[cached_num] = {
+                        "item": item,
+                        "source": source,
+                        "modifiers": modifiers,
+                        "win32gui": myWin
+                    }
                 cached_num += 1
+
+            else:
+
+                #obs.obs_source_release(source)
+                obs.obs_sceneitem_release(item)
+                pass
 
             #obs.obs_source_release(source)
             #obs.obs_sceneitem_release(item)
 
-    #obs.obs_scene_release(sceneObject)
+    obs.obs_scene_release(sceneObject)
     #obs.obs_source_release(currentScene)
     
     #print("Cached %d items." % (cached_num))
@@ -201,43 +272,21 @@ def process_items():
     global cached_items
     global dimensions
 
-    for item in cached_items:
+    if (cached_items == None):
+        return
 
-        source = obs.obs_sceneitem_get_source(item)
+    for key, objects in cached_items.items():
+
+        item = objects["item"]
+        source = objects["source"]
+        modifiers = objects["modifiers"]
+        myWin = objects["win32gui"]
 
         #sourceData = source.get_properties()
 
         #print("My id: %s" % sourceData.id)
 
-        source_id = obs.obs_source_get_id(source)
-        source_name = obs.obs_source_get_name(source)
-
-        modifiers = {}
-
-        flagsSearch = re.findall(tagRegex, source_name)
-        flags = flagsSearch[0].split(",")
-
-        for flag in flags:
-            modifiers[flag.lower()] = True
-
-        #print(modifiers)
-
-        data = obs.obs_source_get_settings(source)
-
-        windowData = obs.obs_data_get_string(data, "window")
-        windowSplit = windowData.split(":")
-
-        windowTitle = windowSplit[0].replace("#3A", ":")
-        #print("Window Title: " + windowData[0])
-        #print("Window EXE: " + windowData[1])
-
         try:
-
-            if (windowData in scene_win_map):
-                myWin = scene_win_map[windowData]
-            else:
-                myWin = win.FindWindow(None, windowTitle)
-                scene_win_map[windowData] = myWin
 
             rect = win.GetWindowRect(myWin)
 
